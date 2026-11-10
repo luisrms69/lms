@@ -26,7 +26,10 @@ export interface ProgramMember {
     progress: number;
     idx: number;
     name: string;
-}  
+    // Set by the server on a saved row; absent on one the form just added. The
+    // program form sorts the member table by it (newest first) for display.
+    creation?: string;
+}
 
 export interface Programs {
     data: Program[];

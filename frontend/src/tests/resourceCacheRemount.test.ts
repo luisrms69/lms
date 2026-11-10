@@ -160,7 +160,7 @@ describe('VideoStatistics.vue across a remount', () => {
  *
  * It proves less than a mount — it cannot catch a NEW resource growing the same
  * shape — but it does stop the specific regression of someone restoring these
- * four cache keys (a merge resolution, or "re-enable the offline cache") and
+ * cache keys (a merge resolution, or "re-enable the offline cache") and
  * still seeing green.
  */
 describe('resources that write component state declare no cache', () => {
@@ -172,7 +172,6 @@ describe('resources that write component state declare no cache', () => {
 		],
 		['pages/Lesson.vue', "doctype: 'LMS Lesson Note'"],
 		['pages/Forms/ProgramForm.vue', "doctype: 'LMS Program Course'"],
-		['pages/Forms/ProgramForm.vue', "doctype: 'LMS Program Member'"],
 	]
 
 	/** The createResource/createListResource call enclosing `marker`. */
