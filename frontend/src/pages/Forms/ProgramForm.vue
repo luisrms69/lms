@@ -120,7 +120,7 @@
 
 						<div class="flex gap-x-2">
 							<Button
-								v-if="(programMembers.data?.length ?? 0) > 0"
+								v-if="(program.program_members?.length ?? 0) > 0"
 								@click="
 									() => {
 										showProgressDialog = true
@@ -144,7 +144,7 @@
 						docked-banner
 						v-if="program.program_members?.length > 0"
 						:columns="memberColumns"
-						:rows="program.program_members"
+						:rows="sortedMembers"
 						row-key="member"
 						:options="{ selectable: true }"
 					>
@@ -216,7 +216,7 @@
 			<ProgramProgressSummary
 				v-model="showProgressDialog"
 				:programName="programId"
-				:programMembers="programMembers.data || []"
+				:programMembers="sortedMembers"
 			/>
 		</template>
 		<template #actions>
@@ -370,17 +370,6 @@ const programCourses = createListResource({
 	},
 })
 
-const programMembers = createListResource({
-	doctype: 'LMS Program Member',
-	pageLength: 99999,
-	fields: ['member', 'full_name', 'progress', 'name'],
-	parent: 'LMS Program',
-	orderBy: 'creation desc',
-	onSuccess(data: ProgramMember[]) {
-		program.value.program_members = data
-	},
-})
-
 const fetchCourses = () => {
 	programCourses.update({
 		filters: {
@@ -392,25 +381,25 @@ const fetchCourses = () => {
 	programCourses.reload()
 }
 
-const fetchMembers = () => {
-	programMembers.update({
-		filters: {
-			parent: programId.value,
-			parenttype: 'LMS Program',
-			parentfield: 'program_members',
-		},
-	})
-	programMembers.reload()
-}
-
-// Only the scalar fields. The two child tables belong to the list resources
-// above, whose responses can land either side of this one — copying them out of
-// the document would let whichever arrived first win.
+// Courses stay on the list resource above: their fields are permlevel 0. The
+// members do not, which is #3221. Since #3125 `member` and `full_name` are
+// permlevel 1, and a list query on the child doctype (`LMS Program Member`)
+// has them stripped by the server — its permlevel check runs against the child
+// doctype, which has no permissions of its own — so the form read them blank
+// and a Save then posted every member back without its `member`. This document,
+// fetched through frappe.client.get, applies LMS Program's own permlevel access
+// to the child rows, so the fields survive. Copy each row out so the form's
+// edits (add, remove) never reach into the cached document, and keep the
+// persisted idx order the rows arrive in; `sortedMembers` sorts a view of them
+// for display.
 const applyDoc = (doc: Program) => {
 	program.value.name = doc.name
 	program.value.title = doc.title
 	program.value.published = Boolean(doc.published)
 	program.value.enforce_course_order = Boolean(doc.enforce_course_order)
+	program.value.program_members = (doc.program_members ?? []).map((row) => ({
+		...row,
+	}))
 	dirty.value = false
 }
 
@@ -422,7 +411,6 @@ watch(
 	() => {
 		if (isNew.value) return
 		fetchCourses()
-		fetchMembers()
 	},
 	{ immediate: true }
 )
@@ -640,4 +628,17 @@ const memberColumns = computed(() => {
 		},
 	]
 })
+
+// Display order only. The list query this form used to read returned members
+// newest-first (`creation desc`); the document hands them back in persisted idx
+// order, which Save must keep, so sort a copy rather than the backing array. A
+// member just added in the form has no `creation` yet — treat it as oldest, so
+// it stays at the end as it did before, until Save and the next fetch place it.
+// localeCompare returns 0 for equal timestamps and Array#sort is stable, so
+// rows sharing a creation keep their idx order.
+const sortedMembers = computed(() =>
+	[...(program.value.program_members ?? [])].sort((a, b) =>
+		(b.creation ?? '').localeCompare(a.creation ?? '')
+	)
+)
 </script>

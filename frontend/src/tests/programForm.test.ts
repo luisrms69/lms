@@ -400,20 +400,31 @@ describe('ProgramForm as a route', () => {
 			).toBe('data-science')
 		})
 
-		it('loads both child tables on mount, with no prop change to trigger it (C3)', async () => {
+		it('loads courses from a list resource and members from the document (C3, #3221)', async () => {
 			await deepLink('data-science')
 
-			for (const doctype of ['LMS Program Course', 'LMS Program Member']) {
-				const resource = listFor(doctype)
-				expect(resource, doctype).toBeDefined()
-				expect(resource.update).toHaveBeenCalledWith({
-					filters: expect.objectContaining({
-						parent: 'data-science',
-						parenttype: 'LMS Program',
-					}),
+			// Courses stay on a list resource: their fields are permlevel 0.
+			const courses = listFor('LMS Program Course')
+			expect(courses).toBeDefined()
+			expect(courses.update).toHaveBeenCalledWith({
+				filters: expect.objectContaining({
+					parent: 'data-science',
+					parenttype: 'LMS Program',
+				}),
+			})
+			expect(courses.reload).toHaveBeenCalledTimes(1)
+
+			// #3221: members are no longer read through a list query on the child
+			// doctype (which strips the permlevel-1 member/full_name); they come
+			// from the program document fetched below.
+			expect(listFor('LMS Program Member')).toBeUndefined()
+			expect(createDocumentResourceMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					doctype: 'LMS Program',
+					name: 'data-science',
+					auto: true,
 				})
-				expect(resource.reload).toHaveBeenCalledTimes(1)
-			}
+			)
 		})
 
 		it('does not wipe the child tables when saved straight after a deep link', async () => {
@@ -423,12 +434,12 @@ describe('ProgramForm as a route', () => {
 			const { wrapper } = await deepLink('data-science')
 
 			listFor('LMS Program Course').answer(COURSE_ROWS)
-			listFor('LMS Program Member').answer(MEMBER_ROWS)
 			resources.docs[0].answer({
 				name: 'data-science',
 				title: 'data-science',
 				published: 1,
 				enforce_course_order: 0,
+				program_members: MEMBER_ROWS,
 			})
 			await flushPromises()
 
@@ -441,15 +452,68 @@ describe('ProgramForm as a route', () => {
 			expect(payload.published).toBe(true)
 		})
 
-		const loadProgram = async (courses: any[], members: any[]) => {
+		it('reads members from the document, so names show and Save keeps them (#3221)', async () => {
+			// #3221: since #3125 `member` and `full_name` are permlevel 1. The form
+			// used to read members with a list query on the child doctype, which the
+			// server strips those fields from, so the table showed blank names and a
+			// Save posted every member back without its `member` — the server then
+			// threw "<User> is already enrolled" on the empty values and no new
+			// member could be added. The document, fetched with frappe.client.get
+			// under the parent's permissions, returns the fields. This test answers
+			// only the document (never a member list resource) and fails on the old
+			// code, where members stayed empty.
+			const COMPLETE_MEMBERS = [
+				{
+					name: 'row-m1',
+					member: 'ana@example.com',
+					full_name: 'Ana Example',
+					idx: 1,
+				},
+				{
+					name: 'row-m2',
+					member: 'bob@example.com',
+					full_name: 'Bob Example',
+					idx: 2,
+				},
+			]
 			const { wrapper } = await deepLink('data-science')
-			listFor('LMS Program Course').answer(courses)
-			listFor('LMS Program Member').answer(members)
+
+			listFor('LMS Program Course').answer([])
 			resources.docs[0].answer({
 				name: 'data-science',
 				title: 'data-science',
 				published: 1,
 				enforce_course_order: 0,
+				program_members: COMPLETE_MEMBERS,
+			})
+			await flushPromises()
+
+			// Members are recognised as present: the empty state is gone and the
+			// Progress Summary button (bound to the model) is shown.
+			expect(wrapper.text()).not.toContain('Add the people who should take')
+			expect(wrapper.text()).toContain('Progress Summary')
+
+			// Save posts the members with their `member` and `full_name`, not the
+			// None the server rejected.
+			await wrapper.find('[data-testid="program-save"]').trigger('click')
+			expect(setValueSubmit).toHaveBeenCalledTimes(1)
+			const payload = setValueSubmit.mock.calls[0][0]
+			expect(payload.program_members.map((m: any) => m.member)).toEqual([
+				'ana@example.com',
+				'bob@example.com',
+			])
+			expect(payload.program_members.every((m: any) => m.full_name)).toBe(true)
+		})
+
+		const loadProgram = async (courses: any[], members: any[]) => {
+			const { wrapper } = await deepLink('data-science')
+			listFor('LMS Program Course').answer(courses)
+			resources.docs[0].answer({
+				name: 'data-science',
+				title: 'data-science',
+				published: 1,
+				enforce_course_order: 0,
+				program_members: members,
 			})
 			await flushPromises()
 			return wrapper
